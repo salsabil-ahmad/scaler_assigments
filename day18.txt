@@ -1,0 +1,189 @@
+Q1:
+with cte_revised_salary as
+(
+    select *, (salary+salary*ifnull(commission_pct,0)) as Net_Salary from employees
+)
+select employee_id, first_name, last_name, salary, Net_Salary from cte_revised_salary
+where Net_Salary > 15000
+order by 1;
+
+Q2:
+WITH CTE_SENIOR AS (
+    SELECT 
+        employee_id, 
+        salary, 
+        SUM(salary) OVER (ORDER BY salary ASC) AS Scumulative_salary,
+        CASE 
+            WHEN (70000 - SUM(salary) OVER (ORDER BY salary ASC)) > 0 THEN 1 
+            ELSE 0 
+        END AS SIndicator
+    FROM candidates
+    WHERE experience = 'Senior'
+    ORDER BY salary
+),
+CTE_JUNIOR AS (
+    SELECT 
+        employee_id, 
+        salary, 
+        SUM(salary) OVER (ORDER BY salary ASC) AS Jcumulative_salary,
+        CASE 
+            WHEN ((SELECT MAX(Scumulative_salary) FROM CTE_SENIOR where SIndicator=1) - SUM(salary) OVER (ORDER BY salary ASC)) > 0 THEN 1 
+            ELSE 0 
+        END AS JIndicator
+    FROM candidates
+    WHERE experience = 'Junior'
+    ORDER BY salary    
+)
+SELECT employee_id 
+FROM CTE_SENIOR 
+WHERE SIndicator = 1
+UNION
+SELECT employee_id 
+FROM CTE_JUNIOR 
+WHERE JIndicator = 1
+order by 1;
+
+
+with cummulative_salary as (
+SELECT *,
+SUM(salary) OVER(PARTITION BY experience ORDER BY salary ASC) AS cummulative_salary
+FROM candidates
+)
+select employee_id 
+#,experience,salary,cummulative_salary 
+from cummulative_salary where experience = 'Senior' and cummulative_salary <= 70000
+union 
+select employee_id
+#,experience,salary, cummulative_salary 
+from cummulative_salary where experience = 'Junior' and 
+cummulative_salary <= 70000 - (select max(cummulative_salary) from cummulative_salary where experience = 'Senior' and cummulative_salary <= 70000)
+order by 1;
+
+Q3:
+with cts as (
+select E.employee_id
+from employees E 
+left join salaries S 
+on E.employee_id = S.employee_id
+where S.employee_id is null
+union all
+select S.employee_id
+from employees E
+right join salaries S 
+on E.employee_id = S.employee_id
+where e.employee_id is null
+)
+select * from cts order by 1;
+
+Q4:
+with cte_store1 as
+(
+    select product_id,'store1' as store, store1 as price from products where store1 is not null
+),
+cte_store2 as
+(
+    select product_id,'store2' as store, store2 as price from products where store2 is not null
+),
+cte_store3 as
+(
+    select product_id,'store3' as store, store3 as price from products where store3 is not null
+)
+select * from cte_store1 union all 
+select * from cte_store2 union all
+select * from cte_store3
+order by 1, 2;
+
+Q5:
+WITH CTE_PLATFORM_CATEGORY AS 
+(SELECT user_id, spend_date, 
+    SUM(CASE platform WHEN 'mobile' THEN amount ELSE 0 END) mobile,
+    SUM(CASE platform WHEN 'desktop' THEN amount ELSE 0 END) desktop
+FROM Spending
+GROUP BY 1,2)
+SELECT spend_date, 'desktop' platform, 
+    SUM(CASE WHEN desktop > 0 AND mobile = 0 THEN desktop ELSE 0 END) total_amount, 
+    count(CASE WHEN desktop > 0 AND mobile = 0 THEN 1 END) total_users
+FROM CTE_PLATFORM_CATEGORY
+GROUP BY 1
+UNION ALL
+SELECT spend_date, 'mobile' platform, 
+     SUM(CASE WHEN mobile > 0 AND desktop = 0 THEN mobile ELSE 0 END) total_amount, 
+     count(CASE WHEN mobile > 0 AND desktop = 0 THEN 1 END) total_users
+FROM CTE_PLATFORM_CATEGORY
+GROUP BY 1
+UNION ALL
+SELECT spend_date, 'both' platform, 
+    SUM(CASE WHEN desktop > 0 AND mobile > 0 THEN mobile + desktop ELSE 0 END) total_amount, 
+    count(CASE WHEN desktop > 0 AND mobile > 0 THEN 1 END) total_users
+FROM CTE_PLATFORM_CATEGORY
+GROUP BY 1 
+order by 1, 2 ;
+
+Q6:
+create or replace view Manager_details as (
+select distinct E.employee_id, concat(E.first_name,' ',E.last_name) as Manager,E.salary, E.phone_number,
+D.department_id, D.department_name,
+L.street_address, L.city, 
+C.country_name, 
+dense_rank() over(order by salary desc) as Salary_Rank
+from employees M 
+join employees E on M.manager_id = E.employee_id
+join departments D on E.department_id = D.department_id
+join Locations L on D.Location_id = L.Location_id
+join countries C on L.country_id  = C.country_id
+);
+select employee_id, Manager, salary, department_name, city, country_name
+from Manager_details
+where Salary_Rank <=5
+order by 3 DESC, 2;
+
+
+Q7:
+WITH  CTE_DEPT_AVGSAL as
+(select D.department_name, avg(E.salary) as avg_salary
+from employees E 
+join departments D on E.department_id = D.department_id
+group by 1
+order by 2 desc
+)
+select *,
+NTILE(10) over(order by avg_salary desc) as salary_Decile
+from CTE_DEPT_AVGSAL;
+
+AQ1:
+WITH CTE_NAME_PRODUCT AS 
+(
+    SELECT O.*, p.product_name 
+    FROM orders O 
+    JOIN products P ON O.product_id = P.product_id
+),
+CTE_PRODUCT_COUNT AS
+(
+    SELECT customer_id, product_id, product_name, COUNT(*) AS product_count 
+    FROM CTE_NAME_PRODUCT
+    GROUP BY customer_id, product_id, product_name
+),
+CTE_RANK AS
+(
+    SELECT customer_id, product_id, product_name,
+           RANK() OVER (PARTITION BY customer_id ORDER BY product_count DESC) AS PRD_RNK
+    FROM CTE_PRODUCT_COUNT
+)
+SELECT customer_id, product_id, product_name from CTE_RANK where PRD_RNK = 1
+order by 1, 2
+
+
+AQ2:
+create or replace view emp_view as 
+(
+    select E.employee_id, E.first_name, E.last_name, E.salary, 
+    D.department_id, D.department_name, 
+    L.location_id, L.street_address, L.city 
+    from employees E 
+    join departments D on E.department_id = D.department_id
+    join locations L on D.location_id = L.location_id
+
+);
+select * from emp_view where lower(city) in ('seattle','southlake')
+order by employee_id;
+
